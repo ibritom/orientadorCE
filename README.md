@@ -2,6 +2,12 @@
 
 Taller de Prolog, CE-1106
 
+Integrantes:
+Iván Ignacio Brito Medina
+Henry Perez Sequeira
+Daniel Jose Espinoza Vega
+Raymond Janfreed Araya Elizondo
+
 ## Descripción
 
 OrientadorCE es un sistema de orientación vocacional desarrollado en Prolog para el curso **Paradigmas de Programación (CE-1106)**.
@@ -707,10 +713,13 @@ Recomendación
 ```text
 orientadorCE/
 │
-├── BD.pl
-├── BNF.pl
-├── Logic.pl
-├── Pruebas_BNF.pl
+├── BD.pl                  # Base de conocimientos
+├── BNF.pl                 # Gramática (DCG) e interpretación de frases
+├── Logic.pl               # Motor de recomendación + conversación en consola
+├── Pruebas_BNF.pl         # Pruebas unitarias de la gramática
+├── Pruebas_Integracion.pl # Pruebas de la conversación completa
+├── ejecutar_pruebas.sh    # Ejecuta TODAS las pruebas con un solo comando
+├── .gitignore
 └── README.md
 ```
 
@@ -754,3 +763,161 @@ Para ejecutar las pruebas de la gramática:
 ?- ['Pruebas_BNF.pl'].
 ?- ejecutar_pruebas.
 ```
+
+---
+
+# Conversación en consola e integración
+
+## Cómo ejecutar el programa
+
+```
+$ swipl Logic.pl
+?- iniciar.
+```
+
+`Logic.pl` carga `BD.pl` y `BNF.pl` automáticamente. También puede usarse
+`?- orientadorCE.` (alias de `iniciar`). Para salir en cualquier momento se
+escribe `salir`.
+
+## Flujo de la conversación
+
+1. El sistema saluda y hace una pregunta abierta (`¿Qué te gusta?`).
+2. La respuesta se interpreta con `interpretar_frase/2` de `BNF.pl`.
+3. Se continúan haciendo las preguntas de `orden_preguntas/1` (`BD.pl`),
+   saltando los intereses que el usuario ya mencionó, hasta reunir
+   `num_preferencias/1` preferencias (3 por defecto).
+4. Se aplica el motor de recomendación y se muestra el resultado.
+
+Si una frase no se reconoce, el programa **no registra nada**, pide reformular y
+vuelve a leer. Las respuestas sueltas "sí"/"no" tampoco se aceptan: el sistema
+exige frases completas. Si el usuario cambia de opinión sobre un interés, la
+última respuesta reemplaza a la anterior.
+
+## Criterio de recomendación
+
+1. Una profesión se **descarta** si el usuario rechazó algún interés de su
+   lista `incompatibles/2`.
+2. Las no descartadas se puntúan con el número de intereses **afirmados** que
+   están en sus `afinidades/2`.
+3. Es **candidata** si su puntaje es al menos `minimo_coincidencias/1` (2).
+4. Se recomiendan las candidatas de **mayor puntaje** (varias si hay empate);
+   si no hay ninguna, se informa que no hay coincidencias.
+
+## Ejemplo de sesión
+
+```
+OrientadorCE: Hola. Estoy aquí para ayudarte a explorar opciones profesionales. ¿Qué te gusta?
+Usuario: Me gusta la ciencia
+OrientadorCE: ¿Te gustan las matemáticas?
+Usuario: Quiero ser millonario
+OrientadorCE: No logré entender tu respuesta. ¿Puedes reformularla?
+              (Ejemplos: "Me gusta la tecnología", "No me gusta la tecnología")
+Usuario: No me gusta ayudar a las personas
+OrientadorCE: ¿Te gusta la tecnología?
+Usuario: Me gusta resolver problemas
+OrientadorCE: Según tus preferencias, te recomiendo cualquiera de estas opciones:
+              - Ingeniería en Computadores (coincide con resolver problemas y la ciencia)
+              - Biología (coincide con la ciencia y resolver problemas)
+              - Estadística (coincide con la ciencia y resolver problemas)
+              Descarté Medicina porque indicaste que no te gusta ayudar a las personas.
+```
+
+---
+
+# Pruebas
+
+Todas las pruebas se ejecutan con un solo comando:
+
+```
+$ ./ejecutar_pruebas.sh
+```
+
+Termina con código 0 si todo pasa y 1 si algo falla. Ejecuta, en orden:
+
+1. `verificar_bd` (consistencia de `BD.pl`);
+2. `Pruebas_BNF.pl` (12 pruebas de la gramática);
+3. `Pruebas_Integracion.pl` (conversación completa).
+
+`Pruebas_Integracion.pl` simula la consola con respuestas predefinidas, captura
+lo que imprime el programa y revisa tanto el texto como las preferencias que
+quedaron registradas. También se puede ejecutar por separado:
+
+```
+$ swipl -g ejecutar_pruebas_integracion -t halt Pruebas_Integracion.pl
+```
+
+| Caso | Entradas del usuario | Qué verifica |
+| ---- | -------------------- | ------------ |
+| 1 | tecnología, matemáticas, resolver problemas (todas positivas) | Una única recomendación: Ingeniería en Computadores, con su justificación |
+| 2 | ciencia (+), resolver problemas (+), ayudar a las personas (−) | Medicina queda **descartada** y se explica por qué |
+| 3 | resolver problemas, ciencia, escribir (+) | **Empate**: se listan varias profesiones |
+| 4 | naturaleza (+), matemáticas (−), tecnología (−) | **Sin coincidencias** suficientes |
+| 5 | "Quiero ser millonario", "Los perros son bonitos", "asdfgh qwerty" y luego 3 frases válidas | Las frases desconocidas **no se registran**; se pide reformular; quedan exactamente 3 preferencias |
+
+Casos adicionales: respuestas "sí"/"no" sueltas, `salir`, fin de entrada (EOF),
+cambio de opinión, y normalización de mayúsculas, tildes y puntuación. Además se
+prueba directamente que `interpretar_respuesta/2` rechaza frases vacías,
+incompletas o sin interés reconocible.
+
+## Nota sobre tildes y configuración regional
+
+`Logic.pl` fuerza UTF-8 en la consola, de modo que escribir tildes y "ñ" funciona
+en cualquier sistema. Sin embargo, `string_lower/2` de SWI-Prolog depende de la
+configuración regional: en un sistema Linux **sin** locale UTF-8, una vocal
+acentuada en MAYÚSCULA ("TECNOLOGÍA") no se convierte a minúscula. Por eso
+`ejecutar_pruebas.sh` fija `LC_ALL=C.UTF-8` cuando hace falta.
+
+---
+
+# Resultados de los cinco casos de prueba (esperado vs. obtenido)
+
+Resultados obtenidos con SWI-Prolog 9.0.4 ejecutando la conversación real
+(`./ejecutar_pruebas.sh`). Las respuestas del usuario se indican entre comillas.
+
+| Caso | Respuestas del usuario | Resultado esperado | Resultado obtenido | Estado |
+| ---- | ---------------------- | ------------------ | ------------------ | ------ |
+| 1 | "Me gusta la tecnología", "Me gustan las matemáticas", "Me gusta resolver problemas" | Una sola recomendación: Ingeniería en Computadores | `te recomiendo Ingeniería en Computadores (Coincide con tu interés en la tecnología, las matemáticas y resolver problemas.)` | Pasa |
+| 2 | "Me gusta la ciencia", "Me gusta resolver problemas", "No me gusta ayudar a las personas" | Medicina descartada y explicada; no aparece entre las recomendaciones | Recomienda Ingeniería en Computadores, Biología y Estadística, y agrega `Descarté Medicina porque indicaste que no te gusta ayudar a las personas.` | Pasa |
+| 3 | "Me gusta resolver problemas", "Me gusta la ciencia", "Me gusta escribir" | Empate: varias profesiones con el mismo puntaje máximo | `cualquiera de estas opciones:` Biología y Estadística (3 coincidencias cada una) | Pasa |
+| 4 | "Me gusta la naturaleza", "No me gustan las matemáticas", "No me gusta la tecnología" | Ninguna profesión alcanza el mínimo de 2 coincidencias | `Lo siento, con esas preferencias no dispongo de una recomendación compatible.` | Pasa |
+| 5 | "Quiero ser millonario", "Los perros son bonitos", "asdfgh qwerty" y luego 3 frases válidas | Las 3 frases desconocidas no se registran; se pide reformular cada vez; al final quedan exactamente 3 preferencias | Tres veces `No logré entender tu respuesta. ¿Puedes reformularla?`; luego recomienda Ingeniería en Computadores; preferencias registradas: `tecnologia-pos, matematicas-pos, resolver_problemas-pos` | Pasa |
+
+---
+
+# Limitaciones conocidas
+
+- **Gramática rígida:** solo se reconoce una preferencia por frase y con los
+  verbos de la BNF. Frases como "Me gusta la tecnología y las matemáticas",
+  "Amo la ciencia" o "Odio escribir" se consideran no reconocidas.
+- **Variantes limitadas por interés:** cada interés admite solo las
+  expresiones listadas en `BNF.pl` (por ejemplo, `escribir` solo se reconoce
+  como "escribir").
+- **Respuestas "sí"/"no" sueltas:** `BNF.pl` las interpreta, pero `Logic.pl`
+  las rechaza a propósito para exigir frases completas.
+- **Si el usuario no se explica, la conversación no avanza:** el programa insiste
+  hasta entender la respuesta; la única salida es escribir `salir`.
+- **Recomendación simple:** el puntaje cuenta coincidencias sin ponderarlas, y
+  solo se consideran 12 profesiones y 16 intereses. Se recopilan 3 preferencias
+  (`num_preferencias/1`), por lo que la recomendación puede cambiar si se
+  pregunta por más.
+- **Mayúsculas con tildes y configuración regional:** en sistemas sin locale
+  UTF-8, una vocal acentuada en mayúscula ("TECNOLOGÍA") no se normaliza (ver
+  nota en la sección *Pruebas*).
+- **Entornos probados:** solo SWI-Prolog 9.0.4 en Linux; no se probó en Windows
+  ni macOS.
+
+---
+
+# Aportes de cada integrante
+
+Según el historial de commits del repositorio (completar o corregir si el
+reparto real fue distinto):
+
+| Integrante | Aporte |
+| ---------- | ------ |
+| Iván Brito (`ibritom`) | Base de conocimientos `BD.pl` (intereses, preguntas, profesiones, afinidades, incompatibilidades, `verificar_bd`) . Creó el repositorio. |
+| Raymond Araya (`Raymond0124`) | Pruebas de la gramática (`BNF.pl`) y gramática DCG e interpretación en `BNF.pl`. Hizo la primera versión del README. |
+| Henry Perez (`Henry-05`) | Motor de recomendación y presentación del resultado(`Logic.pl`). |
+| Daniel Espinoza (`Daniel-Espinoza-2121`) | Flujo de conversación en consola, integrar todo, verificación de frases desconocidas, casos de prueba. (`Logic.pl`) |
+
+---
